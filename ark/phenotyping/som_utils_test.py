@@ -212,10 +212,10 @@ def test_normalize_rows():
         columns=chans
     )
 
-    # add some zero rows
-    fov_pixel_matrix = pd.concat([
-        fov_pixel_matrix, pd.DataFrame(np.zeros((100, 3)), columns=chans)
-    ]).reset_index(drop=True)
+    # # add some zero rows
+    # fov_pixel_matrix = pd.concat([
+    #     fov_pixel_matrix, pd.DataFrame(np.zeros((100, 3)), columns=chans)
+    # ]).reset_index(drop=True)
 
     # add dummy metadata
     fov_pixel_matrix['fov'] = 'fov0'
@@ -238,70 +238,6 @@ def test_normalize_rows():
     # assert all the rows sum to 0.5, 0.5
     # this also checks that all the zero-sum rows have been removed
     assert np.all(fov_pixel_matrix_sub.drop(columns=meta_cols) == [0.5, 0.5])
-
-
-def test_preprocess_row_sums():
-    # define list of fovs and channels
-    fovs = ['fov0', 'fov1', 'fov2']
-    chans = ['chan0', 'chan1', 'chan2']
-
-    # do not need to test for cluster_dir existence, that happens in consensus_cluster
-    with tempfile.TemporaryDirectory() as temp_dir:
-        # create a dummy preprocessed matrix
-        os.mkdir(os.path.join(temp_dir, 'pixel_mat_preprocessed'))
-
-        # write dummy clustered data for each fov
-        for fov in fovs:
-            # create dummy preprocessed data for each fov
-            fov_cluster_matrix = pd.DataFrame(
-                np.repeat(np.array([[2, 4, 4]]), repeats=1000, axis=0),
-                columns=chans
-            )
-
-            # add some zero rows
-            fov_cluster_matrix = pd.concat([
-                fov_cluster_matrix, pd.DataFrame(np.zeros((100, 3)), columns=chans)
-            ])
-
-            # add dummy metadata
-            fov_cluster_matrix['fov'] = fov
-            fov_cluster_matrix['row_index'] = -1
-            fov_cluster_matrix['column_index'] = -1
-            fov_cluster_matrix['segmentation_label'] = -1
-
-            # write the dummy data to pixel_mat_preprocessed
-            feather.write_dataframe(fov_cluster_matrix, os.path.join(temp_dir,
-                                                                     'pixel_mat_preprocessed',
-                                                                     fov + '.feather'))
-
-        # run row preprocessing
-        som_utils.preprocess_row_sums(fovs, chans, temp_dir, 'pixel_mat_preprocessed')
-
-        for fov in fovs:
-            # assert we still have a fov.feather file
-            assert os.path.exists(
-                os.path.join(temp_dir, 'pixel_mat_preprocessed', fov + '.feather')
-            )
-
-            # read the row preprocessed data in
-            fov_row_pre = feather.read_dataframe(os.path.join(temp_dir,
-                                                              'pixel_mat_preprocessed',
-                                                              fov + '.feather'))
-
-            # drop the metadata columns
-            fov_row_pre = fov_row_pre.drop(
-                columns=['fov', 'row_index', 'column_index', 'segmentation_label']
-            )
-
-            # assert the same channels we subsetted on are found in fov_row_pre
-            misc_utils.verify_same_elements(
-                provided_chans=chans,
-                fov_pixel_chans=fov_row_pre.columns.values,
-            )
-
-            # assert all the rows sum to 0.2, 0.4, 0.4
-            # this also checks that all the zero-sum rows have been removed
-            assert np.all(fov_row_pre == [0.2, 0.4, 0.4])
 
 
 def test_compute_pixel_cluster_channel_avg():
@@ -442,40 +378,60 @@ def test_compute_cell_cluster_count_avg():
             clustered_path = os.path.join(temp_dir, 'cell_mat_clustered.feather')
             feather.write_dataframe(cluster_data, clustered_path)
 
-            # TEST 1: paveraged over cell SOM clusters
-            cell_cluster_avg = som_utils.compute_cell_cluster_count_avg(
-                clustered_path, cluster_prefix, 'cluster'
-            )
+            # test for both keep_count settings
+            for keep_count in [False, True]:
+                # TEST 1: paveraged over cell SOM clusters
+                # drop a certain set of columns when checking count avg values
+                drop_cols = ['cluster']
+                if keep_count:
+                    drop_cols.append('count')
 
-            # assert we have results for all 10 labels
-            assert cell_cluster_avg.shape[0] == 10
+                cell_cluster_avg = som_utils.compute_cell_cluster_count_avg(
+                    clustered_path, cluster_prefix, 'cluster', keep_count=keep_count
+                )
 
-            # assert the values are 0.1 across the board
-            cell_cluster_avg_sub = cell_cluster_avg.drop(columns='cluster')
+                # assert we have results for all 10 labels
+                assert cell_cluster_avg.shape[0] == 10
 
-            # division causes tiny errors so round to 1 decimal place
-            cell_cluster_avg_sub = cell_cluster_avg_sub.round(decimals=1)
+                # assert the values are 0.1 across the board
+                cell_cluster_avg_sub = cell_cluster_avg.drop(columns=drop_cols)
 
-            assert np.all(cell_cluster_avg_sub == 0.1)
+                # division causes tiny errors so round to 1 decimal place
+                cell_cluster_avg_sub = cell_cluster_avg_sub.round(decimals=1)
 
-            # TEST 2: averaged over cell meta clusters
-            cell_cluster_avg = som_utils.compute_cell_cluster_count_avg(
-                clustered_path, cluster_prefix, 'hCluster_cap'
-            )
+                assert np.all(cell_cluster_avg_sub == 0.1)
 
-            # assert we have results for all 2 labels
-            assert cell_cluster_avg.shape[0] == 2
+                # assert that the counts are valid if keep_count set to True
+                if keep_count:
+                    assert np.all(cell_cluster_avg['count'].values == 100)
 
-            # assert the values are 0.1 across the board
-            cell_cluster_avg_sub = cell_cluster_avg.drop(columns='hCluster_cap')
+                # TEST 2: averaged over cell meta clusters
+                # drop a certain set of columns when checking count avg values
+                drop_cols = ['hCluster_cap']
+                if keep_count:
+                    drop_cols.append('count')
 
-            # division causes tiny errors so round to 1 decimal place
-            cell_cluster_avg_sub = cell_cluster_avg_sub.round(decimals=1)
+                cell_cluster_avg = som_utils.compute_cell_cluster_count_avg(
+                    clustered_path, cluster_prefix, 'hCluster_cap', keep_count=keep_count
+                )
 
-            assert np.all(cell_cluster_avg_sub == 0.1)
+                # assert we have results for all 2 labels
+                assert cell_cluster_avg.shape[0] == 2
+
+                # assert the values are 0.1 across the board
+                cell_cluster_avg_sub = cell_cluster_avg.drop(columns=drop_cols)
+
+                # division causes tiny errors so round to 1 decimal place
+                cell_cluster_avg_sub = cell_cluster_avg_sub.round(decimals=1)
+
+                assert np.all(cell_cluster_avg_sub == 0.1)
+
+                # assert that the counts are valid if keep_count set to True
+                if keep_count:
+                    assert np.all(cell_cluster_avg['count'].values == 500)
 
 
-def test_compute_cell_cluster_channel_avg():
+def test_compute_p2c_weighted_channel_avg():
     fovs = ['fov1', 'fov2']
     chans = ['chan1', 'chan2', 'chan3']
 
@@ -491,7 +447,7 @@ def test_compute_cell_cluster_channel_avg():
     cell_table.loc[5:9, 'label'] = np.arange(5)
 
     # assign dummy cell sizes, these won't really matter for this test
-    cell_table['cell_size'] = np.random.randint(low=1, high=100, size=(10, 1))
+    cell_table['cell_size'] = 5
 
     with tempfile.TemporaryDirectory() as temp_dir:
         # write cell table
@@ -533,28 +489,30 @@ def test_compute_cell_cluster_channel_avg():
         for cluster_col in ['cluster', 'hCluster_cap']:
             # count number of clusters for each cell
             cell_counts = som_utils.compute_cell_cluster_counts(
-                fovs, pixel_consensus_path, cell_table_path, cluster_col=cluster_col)
+                fovs, pixel_consensus_path, cell_table_path, cluster_col=cluster_col
+            )
 
             # compute average cluster expression for each pixel som cluster
             cluster_avg = som_utils.compute_pixel_cluster_channel_avg(
-                fovs, chans, temp_dir, cluster_col, 'pixel_consensus_path')
+                fovs, chans, temp_dir, cluster_col, 'pixel_consensus_path'
+            )
 
             # error check: invalid fovs provided
             with pytest.raises(ValueError):
-                som_utils.compute_cell_cluster_channel_avg(
+                som_utils.compute_p2c_weighted_channel_avg(
                     cluster_avg, cell_counts, fovs=['fov2', 'fov3']
                 )
 
             # error check: invalid cluster col provided
             with pytest.raises(ValueError):
-                som_utils.compute_cell_cluster_channel_avg(
+                som_utils.compute_p2c_weighted_channel_avg(
                     cluster_avg, cell_counts, cluster_col='bad_cluster_col'
                 )
 
             # test for all and some fovs
             for fov_list in [None, fovs[:1]]:
                 # test with som cluster counts and all fovs
-                channel_avg = som_utils.compute_cell_cluster_channel_avg(
+                channel_avg = som_utils.compute_p2c_weighted_channel_avg(
                     cluster_avg, cell_counts, fovs=fov_list, cluster_col=cluster_col
                 )
 
@@ -568,7 +526,7 @@ def test_compute_cell_cluster_channel_avg():
                     num_repeats = 5
 
                 actual_markers = np.tile(
-                    np.array([1., 2., 4.]), num_repeats
+                    np.array([1, 2, 4]), num_repeats
                 ).reshape(num_repeats, 3)
 
                 # assert the values are close enough
@@ -590,8 +548,8 @@ def test_compute_cell_cluster_counts():
     cell_table.loc[0:4, 'label'] = np.arange(5)
     cell_table.loc[5:9, 'label'] = np.arange(5)
 
-    # assign dummy cell sizes, these won't really matter for this test
-    cell_table['cell_size'] = np.random.randint(low=1, high=100, size=(10, 1))
+    # assign dummy cell sizes
+    cell_table['cell_size'] = 5
 
     with tempfile.TemporaryDirectory() as temp_dir:
         # write cell table
@@ -627,7 +585,8 @@ def test_compute_cell_cluster_counts():
 
         # test counts on the pixel cluster column
         cluster_counts = som_utils.compute_cell_cluster_counts(
-            fovs, pixel_consensus_path, cell_table_path, cluster_col='cluster')
+            fovs, pixel_consensus_path, cell_table_path, cluster_col='cluster'
+        )
 
         # assert we actually created the cluster_cols
         cluster_cols = ['cluster_' + str(cluster_num) for cluster_num in np.arange(3)]
@@ -825,7 +784,7 @@ def test_create_pixel_matrix():
                     # assert the channel names are the same
                     misc_utils.verify_same_elements(
                         flowsom_chans=flowsom_pre_fov.columns.values[:-4],
-                        provided_chans=chan_lists[0]
+                        provided_chans=chans
                     )
 
                     # assert no rows sum to 0
@@ -1072,66 +1031,6 @@ def test_pixel_consensus_cluster(mocker):
             consensus_cluster_ids = fov_consensus_data['hCluster_cap']
 
 
-def test_visualize_pixel_cluster_data():
-    with tempfile.TemporaryDirectory() as temp_dir:
-        fovs = ['fov0', 'fov1', 'fov2']
-        chans = ['Marker1', 'Marker2', 'Marker3', 'Marker4']
-
-        # create a dummy clustered matrix
-        os.mkdir(os.path.join(temp_dir, 'pixel_mat_clustered'))
-
-        # write dummy clustered data for each fov
-        for fov in fovs:
-            # create dummy preprocessed data for each fov
-            fov_cluster_matrix = pd.DataFrame(
-                np.repeat(np.array([[0.1, 0.2, 0.3, 0.4]]), repeats=1000, axis=0),
-                columns=chans
-            )
-
-            # assign dummy SOM cluster labels
-            fov_cluster_matrix['cluster'] = np.repeat(np.arange(100), repeats=10)
-
-            # assign dummy hierarchical cluster labels
-            fov_cluster_matrix['hCluster_cap'] = np.repeat(np.arange(20), repeats=50)
-
-            # write the dummy data to pixel_mat_clustered
-            feather.write_dataframe(fov_cluster_matrix, os.path.join(temp_dir,
-                                                                     'pixel_mat_clustered',
-                                                                     fov + '.feather'))
-
-        # bad cluster_col provided
-        with pytest.raises(ValueError):
-            som_utils.visualize_pixel_cluster_data(fovs=fovs, channels=chans, base_dir=temp_dir,
-                                                   cluster_dir='pixel_mat_clustered',
-                                                   pixel_cluster_col='bad_cluster')
-
-        # test visualization for cluster: no saving
-        som_utils.visualize_pixel_cluster_data(fovs=fovs, channels=chans, base_dir=temp_dir,
-                                               cluster_dir='pixel_mat_clustered',
-                                               pixel_cluster_col='cluster', save_dir=None)
-        assert not os.path.exists(os.path.join(temp_dir, "som_cluster_avgs.png"))
-
-        # test visualization for cluster: saving
-        som_utils.visualize_pixel_cluster_data(fovs=fovs, channels=chans, base_dir=temp_dir,
-                                               cluster_dir='pixel_mat_clustered',
-                                               pixel_cluster_col='cluster', save_dir=temp_dir,
-                                               save_file="som_cluster_avgs.png")
-        assert os.path.exists(os.path.join(temp_dir, "som_cluster_avgs.png"))
-
-        # test visualization for hierarchical cluster: no saving
-        som_utils.visualize_pixel_cluster_data(fovs=fovs, channels=chans, base_dir=temp_dir,
-                                               cluster_dir='pixel_mat_clustered',
-                                               pixel_cluster_col='hCluster_cap', save_dir=None)
-        assert not os.path.exists(os.path.join(temp_dir, "som_hierarchical_avgs.png"))
-
-        # test visualization for hierarchical cluster: saving
-        som_utils.visualize_pixel_cluster_data(fovs=fovs, channels=chans, base_dir=temp_dir,
-                                               cluster_dir='pixel_mat_clustered',
-                                               pixel_cluster_col='hCluster_cap', save_dir=temp_dir,
-                                               save_file="som_hierarchical_avgs.png")
-        assert os.path.exists(os.path.join(temp_dir, "som_hierarchical_avgs.png"))
-
-
 def test_train_cell_som(mocker):
     # basic error check: bad path to cell table path
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -1153,7 +1052,7 @@ def test_train_cell_som(mocker):
     with tempfile.TemporaryDirectory() as temp_dir:
         # create list of markeres and fovs we want to use
         chan_list = ['Marker1', 'Marker2', 'Marker3', 'Marker4']
-        fovs = ['fov0', 'fov1']
+        fovs = ['fov1', 'fov2']
 
         # create an example cell table
         cell_table = pd.DataFrame(np.random.rand(100, 4), columns=chan_list)
@@ -1424,7 +1323,7 @@ def test_cell_consensus_cluster(mocker):
             assert np.all(cluster_ids < 2)
 
 
-def test_visualize_cell_cluster_data():
+def test_visualize_avg_p2c_counts():
     # define the cluster columns
     pixel_clusters = ['cluster_0', 'cluster_1', 'cluster_2']
     h_clusters = ['hCluster_cap_0', 'hCluster_cap_1', 'hCluster_cap_2']
@@ -1454,27 +1353,27 @@ def test_visualize_cell_cluster_data():
 
             # bad column_prefix provided
             with pytest.raises(ValueError):
-                som_utils.visualize_cell_cluster_data(
+                som_utils.visualize_avg_p2c_counts(
                     base_dir=temp_dir, cluster_name='cell_mat_clustered.feather',
                     column_prefix='bad_cluster'
                 )
 
             # bad cluster_col provided
             with pytest.raises(ValueError):
-                som_utils.visualize_cell_cluster_data(
+                som_utils.visualize_avg_p2c_counts(
                     base_dir=temp_dir, cluster_name='cell_mat_clustered.feather',
                     column_prefix=cluster_prefix, cell_cluster_col='bad_cluster'
                 )
 
             # test visualization for cluster: no saving
-            som_utils.visualize_cell_cluster_data(
+            som_utils.visualize_avg_p2c_counts(
                 base_dir=temp_dir, cluster_name='cell_mat_clustered.feather',
                 column_prefix=cluster_prefix, cell_cluster_col='cluster')
 
             assert not os.path.exists(os.path.join(temp_dir, "som_cluster_avgs.png"))
 
             # test visualization for cluster: saving
-            som_utils.visualize_cell_cluster_data(
+            som_utils.visualize_avg_p2c_counts(
                 base_dir=temp_dir, cluster_name='cell_mat_clustered.feather',
                 column_prefix=cluster_prefix, cell_cluster_col='cluster',
                 save_dir=temp_dir, save_file="som_cluster_avgs.png")
@@ -1482,14 +1381,14 @@ def test_visualize_cell_cluster_data():
             assert os.path.exists(os.path.join(temp_dir, "som_cluster_avgs.png"))
 
             # test visualization for hierarchical cluster: no saving
-            som_utils.visualize_cell_cluster_data(
+            som_utils.visualize_avg_p2c_counts(
                 base_dir=temp_dir, cluster_name='cell_mat_clustered.feather',
                 column_prefix=cluster_prefix, cell_cluster_col='hCluster_cap')
 
             assert not os.path.exists(os.path.join(temp_dir, "som_hierarchical_avgs.png"))
 
             # test visualization for cluster: saving
-            som_utils.visualize_cell_cluster_data(
+            som_utils.visualize_avg_p2c_counts(
                 base_dir=temp_dir, cluster_name='cell_mat_clustered.feather',
                 column_prefix=cluster_prefix, cell_cluster_col='hCluster_cap',
                 save_dir=temp_dir, save_file="som_hierarchical_avgs.png")
