@@ -20,5 +20,6 @@
 
    analysis <_markdown/ark.analysis>
    mibi <_markdown/ark.mibi>
+   phenotyping <_markdown/ark.phenotyping>
    segmentation <_markdown/ark.segmentation>
    utils <_markdown/ark.utils>

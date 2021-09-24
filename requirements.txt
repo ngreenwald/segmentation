@@ -1,4 +1,5 @@
 cryptography>=3.4.8,<4
+feather-format>=0.4.1,<1
 google-api-python-client>=2.7.0,<3
 google-auth-httplib2>=0.1.0,<1
 google-auth-oauthlib>=0.4.4,<1
@@ -14,6 +15,7 @@ scikit-learn>=0.19.1,<1
 scipy>=1.1.0,<2
 seaborn>=0.10.1,<1
 statsmodels>=0.11.1,<1
+tables>=3.6.1,<4
 umap-learn>=0.4.6,<1
 xarray>=0.12.3,<1
 tqdm>=4.54.1,<5
